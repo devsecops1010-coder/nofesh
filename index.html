@@ -224,7 +224,7 @@ function defaults(){const t=new Date();const fri=addDays(t,(5-t.getDay()+7)%7||7
     f:{type:'all',am:[],max:3000,fav:false,sort:'pa'},items:SAMPLES.map(s=>({...s}))}}
 let S=load();
 function load(){try{const r=JSON.parse(localStorage.getItem(KEY));if(r&&r.items)return Object.assign(defaults(),r)}catch(e){}return defaults()}
-function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}if(window.cloudSync)cloudSync()}
 const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const region=id=>REGIONS.find(r=>r.id===id)||REGIONS[0];
@@ -302,6 +302,7 @@ function renderList(){
   renderFilters();
   const hasSamples=S.items.some(i=>i.sample);
   $('#sampleNotice').innerHTML=hasSamples?`<div class="notice"><span>ℹ️</span><div style="flex:1">המקומות שמסומנים <span class="badge">דוגמה</span> אינם אמיתיים, והם כאן רק כדי להראות איך הסינון עובד.</div><button class="btn sm ghost" onclick="removeSamples()">הסר דוגמאות</button></div>`:'';
+  if(!S.home&&!S.syncHide)$('#sampleNotice').innerHTML+=`<div class="notice"><span>📱</span><div style="flex:1"><b>לראות את הרשימה גם בטלפון השני ובמחשב?</b> חיבור חד-פעמי בקישור.</div><button class="btn sm" onclick="openHomeLink()">חבר</button><button class="btn sm ghost" onclick="S.syncHide=1;save();renderList()">✕</button></div>`;
   const list=filtered(),n=nights(),box=$('#listBody');
   $('#countTxt').textContent=`${list.length} מקומות${S.region!=='all'?' ב'+region(S.region).he:''}`;
   if(!S.items.length){box.innerHTML='<div class="empty glass card"><div class="ic">🏡</div>עוד לא שמרת מקומות.<br>חפש ב"מחירים חיים" ושמור כאן את מה שאהבת.</div>';return}
@@ -363,11 +364,73 @@ function openMenu(){openSheet(`<h3>עוד</h3>
   <button class="btn block ghost" onclick="exportData()">ייצוא הרשימה לקובץ</button>
   <label class="btn block ghost" style="margin-top:8px;text-align:center">ייבוא מקובץ<input type="file" accept="application/json" style="display:none" onchange="importData(this.files[0])"></label>
   <button class="btn block ghost" style="margin-top:8px" onclick="S.items=S.items.filter(i=>!i.sample).concat(SAMPLES.map(s=>({...s})));save();closeSheet();setView('list');renderList()">הצג שוב מקומות לדוגמה</button>
-  <p class="hint" style="margin-top:12px">הרשימה נשמרת במכשיר הזה. המחירים החיים מגיעים מ-Booking, Google ו-Airbnb.</p>`)}
+  <button class="btn block" style="margin-top:8px" onclick="openHomeLink()">📱 ${S.home?'חבר מכשיר נוסף':'סנכרון עם טלפון או מחשב נוסף'}</button>
+  ${S.home?`<button class="btn block ghost" style="margin-top:8px;color:var(--bad,#e11d48)" onclick="doUnpair()">נתק את המכשיר הזה מהסנכרון</button>`:''}
+  <p class="hint" style="margin-top:12px">${S.home?(HOME_OK?'☁︎ הרשימה מסונכרנת בין המכשירים שחוברו.':'☁︎ מתחבר לסנכרון…'):'הרשימה נשמרת כרגע רק במכשיר הזה.'} המחירים החיים מגיעים מ-Booking, Google ו-Airbnb.</p>`)}
 function exportData(){const b=new Blob([JSON.stringify(S.items.filter(i=>!i.sample),null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='nofesh-list.json';a.click();URL.revokeObjectURL(a.href)}
 async function importData(f){if(!f)return;try{const arr=JSON.parse(await f.text());if(!Array.isArray(arr))throw 0;
   const ok=arr.filter(x=>x&&x.name&&x.price>0).map(x=>({id:uid(),fav:!!x.fav,name:String(x.name),region:region(x.region).id==='all'?'golan':x.region,type:typeOf(x.type).id,price:+x.price,rating:x.rating||'',am:Array.isArray(x.am)?x.am:[],url:x.url||'',sample:false}));
   S.items=S.items.concat(ok);save();closeSheet();setView('list');renderList();toast(`יובאו ${ok.length} מקומות`)}catch(e){toast('הקובץ לא תקין')}}
+
+/* ============ device sync: one-time link, then "הרשימה שלי" updates on every connected device ============
+   doc nofesh_homes/{home}.items = { id: place }  (written per item, so two devices adding at once don't collide; samples never sync) */
+const FB_CONFIG={apiKey:"AIzaSyBC3mvpnaMF-idW26lkkKpXyLo8ePE6apQ",authDomain:"ravakim-budapest.firebaseapp.com",projectId:"ravakim-budapest",storageBucket:"ravakim-budapest.firebasestorage.app",messagingSenderId:"864932417069",appId:"1:864932417069:web:773c95c4c286874105f2a4"};
+let FB=null,HOME_UNSUB=null,HOME_OK=false,LASTC=null;const PEND='nofesh.pend';
+/* dotted update map {'items.x':v,...} → nested object for ONE deep-merge write (creates the doc if missing, never wipes other entries) */
+function nest(upd){const o={};Object.entries(upd).forEach(([k,v])=>{const p=k.split('.');let c=o;for(let i=0;i<p.length-1;i++)c=c[p[i]]=c[p[i]]||{};c[p[p.length-1]]=v});return o}
+function loadFB(){if(FB)return FB;const sc=src=>new Promise((ok,no)=>{const e=document.createElement('script');e.src=src;e.onload=ok;e.onerror=no;document.head.appendChild(e)});
+  FB=sc('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js').then(()=>sc('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js'))
+    .then(()=>{if(!firebase.apps.length)firebase.initializeApp(FB_CONFIG);return firebase.firestore()}).catch(e=>{FB=null;throw e});return FB}
+const newToken=()=>{const a=new Uint8Array(18);crypto.getRandomValues(a);return Array.from(a,b=>'abcdefghijkmnpqrstuvwxyz23456789'[b%32]).join('')+'x'+Date.now().toString(36)};
+const cleanP=i=>({name:String(i.name||''),region:i.region||'golan',type:i.type||'hotel',price:+i.price||0,rating:i.rating||'',am:Array.isArray(i.am)?i.am:[],url:i.url||'',fav:!!i.fav});
+const realItems=()=>S.items.filter(i=>!i.sample);
+function homeRef(){return firebase.firestore().collection('nofesh_homes').doc(S.home)}
+function startHome(){
+  if(!S.home||HOME_UNSUB)return;HOME_UNSUB='starting';
+  loadFB().then(db=>{let first=true;
+    HOME_UNSUB=db.collection('nofesh_homes').doc(S.home).onSnapshot(snap=>{
+      HOME_OK=true;const items=(snap.data()||{}).items||{};   // (Firestore's local view already includes our own unsent writes)
+      let pend=false;try{pend=!!localStorage.getItem(PEND)}catch(e){}
+      if(first&&!S.joinMerge&&pend){first=false;LASTC=items;pushDiff();return}   // edits made offline last time → send them
+      if(first&&S.joinMerge){first=false;LASTC=items;delete S.joinMerge;   // joining: keep this device's places AND the cloud's
+        const have=new Set(Object.keys(items));
+        const extra=realItems().filter(i=>!have.has(i.id));
+        S.items=[...S.items.filter(i=>i.sample),...Object.entries(items).map(([id,v])=>({id,...v,sample:false})),...extra];
+        try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}pushDiff();renderAll();return}
+      first=false;LASTC=items;
+      S.items=[...S.items.filter(i=>i.sample),...Object.entries(items).map(([id,v])=>({id,...v,sample:false}))];
+      try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}renderAll();
+    },err=>{HOME_UNSUB=null;HOME_OK=false;toast('אין חיבור לסנכרון כרגע')});
+  }).catch(()=>{HOME_UNSUB=null;toast('אין חיבור לענן, נשמר במכשיר')});
+}
+function pushDiff(){
+  if(!S.home||typeof HOME_UNSUB!=='function'||!LASTC)return;
+  const upd={},cur={};
+  realItems().forEach(i=>{cur[i.id]=cleanP(i);const o=LASTC[i.id];if(!o||JSON.stringify(cleanP(o))!==JSON.stringify(cur[i.id]))upd['items.'+i.id]=cur[i.id]});
+  Object.keys(LASTC).forEach(id=>{if(!cur[id])upd['items.'+id]=firebase.firestore.FieldValue.delete()});
+  if(!Object.keys(upd).length){try{localStorage.removeItem(PEND)}catch(e){}return}
+  upd.t=Date.now();LASTC=Object.assign({},cur);try{localStorage.setItem(PEND,'1')}catch(e){}
+  const ref=homeRef();ref.set(nest(upd),{merge:true}).then(()=>{try{localStorage.removeItem(PEND)}catch(e){}}).catch(()=>{});
+}
+window.cloudSync=pushDiff;
+function homeLink(){return location.origin+location.pathname+'#home='+S.home}
+function openHomeLink(){
+  if(!S.home){S.home=newToken();S.joinMerge=1;try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}startHome()}
+  const link=homeLink(),msg=`🏡 נופש, רשימת המקומות שלנו מסונכרנת. לפתוח פעם אחת בכל טלפון או מחשב:\n${link}`;
+  openSheet(`<h3>📱 סנכרון בין מכשירים</h3>
+    <p class="hint" style="line-height:1.6">פותחים את הקישור <b>פעם אחת</b> בכל טלפון או מחשב. מאותו רגע כל מקום שנשמר, נמחק או סומן כמועדף מתעדכן בכולם. במחשב: שלחו לעצמכם בוואטסאפ ווב, או סרקו את הקוד מהטלפון.</p>
+    <div id="qrBox" style="display:grid;place-items:center;margin:6px 0 10px"></div>
+    <div style="direction:ltr;word-break:break-all;font-size:12px;padding:8px 10px;border-radius:12px;border:1px solid var(--glass-brd);background:var(--card2);margin-bottom:10px">${esc(link)}</div>
+    <div style="display:flex;gap:8px"><a class="btn block" style="text-align:center;text-decoration:none" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(msg)}">וואטסאפ</a>
+    <button class="btn block ghost" onclick="navigator.clipboard?.writeText('${link}');toast('הקישור הועתק ✓')">העתק קישור</button></div>`);
+  const box=$('#qrBox'),go=()=>{try{box.innerHTML='';new QRCode(box,{text:link,width:150,height:150,correctLevel:QRCode.CorrectLevel.M});Object.assign(box.style,{background:'#fff',padding:'10px',borderRadius:'14px',justifySelf:'center'})}catch(e){}};
+  if(window.QRCode)go();else{const sc=document.createElement('script');sc.src='https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';sc.onload=go;document.head.appendChild(sc)}
+}
+function doUnpair(){if(typeof HOME_UNSUB==='function')HOME_UNSUB();HOME_UNSUB=null;HOME_OK=false;LASTC=null;S.home=null;try{localStorage.setItem(KEY,JSON.stringify(S));localStorage.removeItem(PEND)}catch(e){}closeSheet();toast('המכשיר נותק מהסנכרון')}
+function joinFromHash(){const h=location.hash.match(/home=([a-z0-9]{20,40})/);if(!h)return;history.replaceState(null,'',location.pathname);
+  if(S.home!==h[1]){if(S.home)doUnpair();S.home=h[1];S.joinMerge=1;S.items=S.items.filter(i=>!i.sample);try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}toast('המכשיר חובר ✓ הרשימה מסתנכרנת');setView('list')}}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&typeof HOME_UNSUB==='function'){let p=false;try{p=!!localStorage.getItem(PEND)}catch(e){}if(p)pushDiff()}});
+window.addEventListener('hashchange',()=>{joinFromHash();startHome();renderAll()});
 
 /* ============ theme ============ */
 function applyTheme(){document.documentElement.setAttribute('data-theme',S.theme==='auto'?'':S.theme);$('#themeBtn').textContent=S.theme==='dark'?'☀':S.theme==='light'?'☾':'◐'}
@@ -392,7 +455,7 @@ function renderInstall(){
 /* ============ boot ============ */
 function renderAll(){renderSearch();renderLive();renderList()}
 if(S.dIn<iso(new Date())){const d=defaults();S.dIn=d.dIn;S.dOut=d.dOut;save()}  // stale dates from an old visit → next weekend
-applyTheme();renderAll();setView(S.view);renderInstall();
+joinFromHash();applyTheme();renderAll();setView(S.view);renderInstall();startHome();
 if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
 </script>
 </body>
