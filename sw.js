@@ -1,5 +1,5 @@
 // נופש — offline service worker
-const CACHE = 'nofesh-v1';
+const CACHE = 'nofesh-v2';
 const ASSETS = ['./', './index.html', './manifest.json', './icon.png', './icon-192.png'];
 self.addEventListener('install', e => { self.skipWaiting(); e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS).catch(() => {}))); });
 self.addEventListener('activate', e => {

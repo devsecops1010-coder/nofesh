@@ -126,6 +126,7 @@ input,select{font-size:16px}
 @keyframes fade{from{opacity:0}to{opacity:1}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important}}
 @media (prefers-reduced-transparency:reduce){:root{--card:#fff;--card2:#f4f7fb}}
+.share-row{display:flex;gap:8px;margin:12px 0 0}.share-row .wa{flex:2;background:linear-gradient(135deg,#22c55e,#128c7e);box-shadow:0 6px 18px rgba(18,140,126,.3)}.share-row .ghost{flex:1}
 </style>
 </head>
 <body>
@@ -177,6 +178,7 @@ input,select{font-size:16px}
           <option value="pa">מחיר: מהזול ליקר</option><option value="pd">מחיר: מהיקר לזול</option><option value="r">דירוג גבוה</option>
         </select></div>
       <div id="listBody"></div>
+      <div class="share-row"><button class="btn block wa" onclick="shareWA()">📤 שתף בוואטסאפ</button><button class="btn block ghost" onclick="openRegionMap()">🗺 מפה</button></div>
       <button class="btn block fab" onclick="openEdit()">+ הוסף מקום</button>
     </section>
   </div>
@@ -255,7 +257,8 @@ function liveLinks(){
   const gq=encodeURIComponent(`מלונות וצימרים ב${r.id==='all'?'ישראל':r.he} ${S.dIn} עד ${S.dOut}`);
   const google=`https://www.google.com/travel/search?q=${gq}&hl=he&curr=ILS`;
   const airbnb=`https://www.airbnb.co.il/s/${encodeURIComponent(r.q)}/homes?checkin=${S.dIn}&checkout=${S.dOut}&adults=${S.guests}`;
-  return{booking,google,airbnb,n};
+  const maps=mapsUrl(`מלונות וצימרים ${r.id==='all'?'בישראל':'ב'+r.he}`);
+  return{booking,google,airbnb,maps,n};
 }
 function renderLive(){
   const L=liveLinks(),r=region(S.region),box=$('#liveBody');
@@ -270,6 +273,9 @@ function renderLive(){
   <a class="prov glass" href="${L.airbnb}" target="_blank" rel="noopener">
     <span class="pi" style="background:#ff385c">A</span>
     <span class="pt"><b>Airbnb · צימרים ובתים</b><span>בתים פרטיים, בקתות וצימרים באזור</span></span><span class="go">‹</span></a>
+  <a class="prov glass" href="${L.maps}" target="_blank" rel="noopener">
+    <span class="pi" style="background:linear-gradient(135deg,#34a853,#fbbc04)">📍</span>
+    <span class="pt"><b>Google Maps · על המפה</b><span>כל המלונות והצימרים באזור כנקודות במפה, עם מחיר ללילה</span></span><span class="go">‹</span></a>
   <p class="hint" style="margin:6px 4px 0;line-height:1.6">המחירים מגיעים ישירות מהאתרים ומתעדכנים בזמן אמת. מצאת מקום שאהבת? שמור אותו ב<b>"הרשימה שלי"</b> עם המחיר והקישור, ותוכל להשוות ולסנן.</p>`;
 }
 
@@ -309,8 +315,22 @@ function renderList(){
       <div class="side"><div class="price"><b>${ils(it.price)}</b><span>ללילה</span>${n>1?`<div class="tot">${ils(it.price*n)} ל-${n} לילות</div>`:''}</div>
         <div class="acts"><button class="fav${it.fav?' on':''}" onclick="toggleFav('${it.id}')" aria-label="מועדף">${it.fav?'❤️':'🤍'}</button>
         ${it.url?`<a href="${esc(it.url)}" target="_blank" rel="noopener" aria-label="פתח">↗</a>`:''}
+        <a href="${mapsUrl(it.sample?'צימרים '+region(it.region).he:it.name+' '+region(it.region).he)}" target="_blank" rel="noopener" aria-label="במפה">📍</a>
         <button onclick="openEdit('${it.id}')" aria-label="ערוך">✎</button></div></div>
     </div>`}).join('');
+}
+function mapsUrl(q){return 'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(q)}
+function openRegionMap(){const r=region(S.region);window.open(mapsUrl(`מלונות וצימרים ${r.id==='all'?'בישראל':'ב'+r.he}`),'_blank','noopener')}
+/* share the (filtered) list as a WhatsApp message — real places only, never the sample entries */
+function shareWA(){
+  const list=filtered().filter(i=>!i.sample),n=nights(),r=region(S.region);
+  if(!list.length){toast(S.items.some(i=>i.sample)?'אין עדיין מקומות אמיתיים לשתף (הדוגמאות לא נשלחות)':'אין מקומות לשתף');return}
+  const d=x=>{const[y,m,dd]=x.split('-');return `${+dd}.${+m}`};
+  let t=`🏡 *אפשרויות לינה${r.id==='all'?'':' ב'+r.he}*\n${d(S.dIn)}–${d(S.dOut)}${n?` · ${n} ${n===1?'לילה':'לילות'}`:''} · ${S.guests} אורחים\n`;
+  list.forEach((it,i)=>{t+=`\n${i+1}. *${it.name}* (${typeOf(it.type).he}, ${region(it.region).he})\n   ${ils(it.price)} ללילה${n>1?` · ${ils(it.price*n)} סה״כ`:''}${it.rating?` · ⭐ ${(+it.rating).toFixed(1)}`:''}\n`;
+    if(it.url)t+=`   ${it.url}\n`});
+  t+=`\nממוין ${S.f.sort==='pd'?'מהיקר לזול':S.f.sort==='r'?'לפי דירוג':'מהזול ליקר'} · נשלח מאפליקציית נופש`;
+  window.open('https://wa.me/?text='+encodeURIComponent(t),'_blank','noopener');
 }
 function toggleFav(id){const it=S.items.find(i=>i.id===id);it.fav=!it.fav;save();renderList()}
 function removeSamples(){S.items=S.items.filter(i=>!i.sample);save();renderList();toast('הדוגמאות הוסרו')}
