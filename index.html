@@ -245,8 +245,8 @@ function renderSearch(){
   const n=nights();
   $('#nightsHint').textContent=n?`${n} ${n===1?'לילה':'לילות'} · ${S.guests} אורחים`:'תאריך היציאה צריך להיות אחרי הכניסה';
 }
-$('#dIn').onchange=e=>{S.dIn=e.target.value;if(new Date(S.dOut)<=new Date(S.dIn))S.dOut=iso(addDays(new Date(S.dIn),1));save();renderAll()};
-$('#dOut').onchange=e=>{S.dOut=e.target.value;save();renderAll()};
+$('#dIn').onchange=e=>{if(!e.target.value){renderSearch();return}S.dIn=e.target.value;if(new Date(S.dOut)<=new Date(S.dIn))S.dOut=iso(addDays(new Date(S.dIn),1));save();renderAll()};
+$('#dOut').onchange=e=>{if(!e.target.value||e.target.value<=S.dIn){toast('תאריך היציאה צריך להיות אחרי הכניסה');renderSearch();return}S.dOut=e.target.value;save();renderAll()};
 function setGuests(d){S.guests=Math.min(16,Math.max(1,S.guests+d));save();renderAll()}
 function setView(v){S.view=v;save();$('#v-live').classList.toggle('on',v==='live');$('#v-list').classList.toggle('on',v==='list');$('#segLive').classList.toggle('on',v==='live');$('#segList').classList.toggle('on',v==='list')}
 
@@ -315,7 +315,7 @@ function renderList(){
         <div class="am">${(it.am||[]).map(a=>`<span>${esc((AMEN.find(x=>x.id===a)||{}).he||a)}</span>`).join('')}</div></div>
       <div class="side"><div class="price"><b>${ils(it.price)}</b><span>ללילה</span>${n>1?`<div class="tot">${ils(it.price*n)} ל-${n} לילות</div>`:''}</div>
         <div class="acts"><button class="fav${it.fav?' on':''}" onclick="toggleFav('${it.id}')" aria-label="מועדף">${it.fav?'❤️':'🤍'}</button>
-        ${it.url?`<a href="${esc(it.url)}" target="_blank" rel="noopener" aria-label="פתח">↗</a>`:''}
+        ${safeUrl(it.url)?`<a href="${esc(safeUrl(it.url))}" target="_blank" rel="noopener" aria-label="פתח">↗</a>`:''}
         <a href="${mapsUrl(it.sample?'צימרים '+region(it.region).he:it.name+' '+region(it.region).he)}" target="_blank" rel="noopener" aria-label="במפה">📍</a>
         <button onclick="openEdit('${it.id}')" aria-label="ערוך">✎</button></div></div>
     </div>`}).join('');
@@ -333,11 +333,11 @@ function shareWA(){
   t+=`\nממוין ${S.f.sort==='pd'?'מהיקר לזול':S.f.sort==='r'?'לפי דירוג':'מהזול ליקר'} · נשלח מאפליקציית נופש`;
   window.open('https://wa.me/?text='+encodeURIComponent(t),'_blank','noopener');
 }
-function toggleFav(id){const it=S.items.find(i=>i.id===id);it.fav=!it.fav;save();renderList()}
+function toggleFav(id){const it=S.items.find(i=>i.id===id);if(!it)return;it.fav=!it.fav;save();renderList()}
 function removeSamples(){S.items=S.items.filter(i=>!i.sample);save();renderList();toast('הדוגמאות הוסרו')}
 const uid=()=>Math.random().toString(36).slice(2,9);
 function openEdit(id){
-  const it=id?S.items.find(i=>i.id===id):{name:'',region:S.region==='all'?'golan':S.region,type:'zimmer',price:'',rating:'',am:[],url:''};
+  const it=(id&&S.items.find(i=>i.id===id))||{name:'',region:S.region==='all'?'golan':S.region,type:'zimmer',price:'',rating:'',am:[],url:''};
   openSheet(`<h3>${id?'עריכת מקום':'מקום חדש'}</h3>
     <div class="field"><label>שם</label><input class="input" id="e_name" value="${esc(it.name)}" placeholder="למשל: צימר בקתות הגליל"></div>
     <div class="g2"><div class="field"><label>אזור</label><select class="input" id="e_region">${REGIONS.filter(r=>r.id!=='all').map(r=>`<option value="${r.id}"${r.id===it.region?' selected':''}>${r.he}</option>`).join('')}</select></div>
@@ -346,7 +346,7 @@ function openEdit(id){
       <div class="field"><label>דירוג (1–5, לא חובה)</label><input class="input" id="e_rating" type="number" inputmode="decimal" min="1" max="5" step="0.1" value="${esc(it.rating)}"></div></div>
     <div class="field"><label>כולל</label><div class="chips" id="e_am" style="flex-wrap:wrap">${AMEN.map(a=>`<button type="button" class="chip${(it.am||[]).includes(a.id)?' on':''}" data-a="${a.id}" onclick="this.classList.toggle('on')">${a.he}</button>`).join('')}</div></div>
     <div class="field"><label>קישור להזמנה (לא חובה)</label><input class="input" id="e_url" type="url" dir="ltr" value="${esc(it.url)}" placeholder="https://"></div>
-    <div style="display:flex;gap:8px;margin-top:6px"><button class="btn block" onclick="saveEdit('${id||''}')">שמירה</button>${id?`<button class="btn danger" onclick="delItem('${id}')">מחק</button>`:''}</div>`);
+    <div style="display:flex;gap:8px;margin-top:6px"><button class="btn block" onclick="saveEdit('${id||''}')">שמירה</button>${id&&S.items.some(i=>i.id===id)?`<button class="btn danger" onclick="delItem('${id}')">מחק</button>`:''}</div>`);
 }
 function saveEdit(id){
   const name=$('#e_name').value.trim(),price=+$('#e_price').value;
@@ -354,7 +354,8 @@ function saveEdit(id){
   let url=$('#e_url').value.trim();if(url&&!/^https?:\/\//i.test(url))url='https://'+url;
   const r=parseFloat($('#e_rating').value);
   const data={name,region:$('#e_region').value,type:$('#e_type').value,price,rating:r>=1&&r<=5?r:'',am:[...document.querySelectorAll('#e_am .chip.on')].map(b=>b.dataset.a),url,sample:false};
-  if(id)Object.assign(S.items.find(i=>i.id===id),data);else S.items.push({id:uid(),fav:false,...data});
+  const t=id&&S.items.find(i=>i.id===id);
+  if(t){if(t.sample)t.id=uid();Object.assign(t,data)}else S.items.push({id:uid(),fav:false,...data});
   save();closeSheet();setView('list');renderList();toast('נשמר');
 }
 function delItem(id){S.items=S.items.filter(i=>i.id!==id);save();closeSheet();renderList();toast('נמחק')}
@@ -369,48 +370,60 @@ function openMenu(){openSheet(`<h3>עוד</h3>
   <p class="hint" style="margin-top:12px">${S.home?(HOME_OK?'☁︎ הרשימה מסונכרנת בין המכשירים שחוברו.':'☁︎ מתחבר לסנכרון…'):'הרשימה נשמרת כרגע רק במכשיר הזה.'} המחירים החיים מגיעים מ-Booking, Google ו-Airbnb.</p>`)}
 function exportData(){const b=new Blob([JSON.stringify(S.items.filter(i=>!i.sample),null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='nofesh-list.json';a.click();URL.revokeObjectURL(a.href)}
 async function importData(f){if(!f)return;try{const arr=JSON.parse(await f.text());if(!Array.isArray(arr))throw 0;
-  const ok=arr.filter(x=>x&&x.name&&x.price>0).map(x=>({id:uid(),fav:!!x.fav,name:String(x.name),region:region(x.region).id==='all'?'golan':x.region,type:typeOf(x.type).id,price:+x.price,rating:x.rating||'',am:Array.isArray(x.am)?x.am:[],url:x.url||'',sample:false}));
+  const k=x=>x.name+'|'+x.region+'|'+x.price,have=new Set(S.items.filter(i=>!i.sample).map(k));
+  const ok=arr.filter(x=>x&&x.name&&x.price>0).map(x=>({id:uid(),sample:false,...cleanP(x)})).filter(x=>{if(have.has(k(x)))return false;have.add(k(x));return true});
   S.items=S.items.concat(ok);save();closeSheet();setView('list');renderList();toast(`יובאו ${ok.length} מקומות`)}catch(e){toast('הקובץ לא תקין')}}
 
 /* ============ device sync: one-time link, then "הרשימה שלי" updates on every connected device ============
    doc nofesh_homes/{home}.items = { id: place }  (written per item, so two devices adding at once don't collide; samples never sync) */
 const FB_CONFIG={apiKey:"AIzaSyBC3mvpnaMF-idW26lkkKpXyLo8ePE6apQ",authDomain:"ravakim-budapest.firebaseapp.com",projectId:"ravakim-budapest",storageBucket:"ravakim-budapest.firebasestorage.app",messagingSenderId:"864932417069",appId:"1:864932417069:web:773c95c4c286874105f2a4"};
-let FB=null,HOME_UNSUB=null,HOME_OK=false,LASTC=null;const PEND='nofesh.pend';
+let FB=null,HOME_UNSUB=null,HOME_OK=false,LASTC=null,INF=0;const PEND='nofesh.pend',BASE='nofesh.base';
+const getBase=()=>{try{return JSON.parse(localStorage.getItem(BASE))||{}}catch(e){return{}}},setBase=v=>{try{v?localStorage.setItem(BASE,JSON.stringify(v)):localStorage.removeItem(BASE)}catch(e){}};
 /* dotted update map {'items.x':v,...} → nested object for ONE deep-merge write (creates the doc if missing, never wipes other entries) */
 function nest(upd){const o={};Object.entries(upd).forEach(([k,v])=>{const p=k.split('.');let c=o;for(let i=0;i<p.length-1;i++)c=c[p[i]]=c[p[i]]||{};c[p[p.length-1]]=v});return o}
 function loadFB(){if(FB)return FB;const sc=src=>new Promise((ok,no)=>{const e=document.createElement('script');e.src=src;e.onload=ok;e.onerror=no;document.head.appendChild(e)});
   FB=sc('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js').then(()=>sc('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js'))
     .then(()=>{if(!firebase.apps.length)firebase.initializeApp(FB_CONFIG);return firebase.firestore()}).catch(e=>{FB=null;throw e});return FB}
 const newToken=()=>{const a=new Uint8Array(18);crypto.getRandomValues(a);return Array.from(a,b=>'abcdefghijkmnpqrstuvwxyz23456789'[b%32]).join('')+'x'+Date.now().toString(36)};
-const cleanP=i=>({name:String(i.name||''),region:i.region||'golan',type:i.type||'hotel',price:+i.price||0,rating:i.rating||'',am:Array.isArray(i.am)?i.am:[],url:i.url||'',fav:!!i.fav});
+const safeUrl=u=>/^https?:\/\//i.test(String(u||''))?String(u):'';
+const cleanP=i=>({name:String(i.name||''),region:REGIONS.some(r=>r.id===i.region&&r.id!=='all')?i.region:'golan',type:TYPES.some(t=>t.id===i.type&&t.id!=='all')?i.type:'hotel',price:+i.price||0,rating:+i.rating||'',am:Array.isArray(i.am)?i.am.filter(a=>AMEN.some(x=>x.id===a)):[],url:safeUrl(i.url),fav:!!i.fav});
+const OKID=/^[a-z0-9]{1,40}$/i;
+const okItems=it=>{const o={};Object.entries(it||{}).forEach(([k,v])=>{if(OKID.test(k)&&v&&typeof v==='object')o[k]=cleanP(v)});return o};
 const realItems=()=>S.items.filter(i=>!i.sample);
 function homeRef(){return firebase.firestore().collection('nofesh_homes').doc(S.home)}
 function startHome(){
-  if(!S.home||HOME_UNSUB)return;HOME_UNSUB='starting';
+  if(!S.home||HOME_UNSUB)return;HOME_UNSUB='starting';const myHome=S.home;
   loadFB().then(db=>{let first=true;
-    HOME_UNSUB=db.collection('nofesh_homes').doc(S.home).onSnapshot(snap=>{
-      HOME_OK=true;const items=(snap.data()||{}).items||{};   // (Firestore's local view already includes our own unsent writes)
+    if(HOME_UNSUB!=='starting'||S.home!==myHome)return;
+    HOME_UNSUB=db.collection('nofesh_homes').doc(myHome).onSnapshot(snap=>{
+      if(first&&snap.metadata.fromCache&&!snap.exists)return;     // offline cache knows nothing yet → wait for the server
+      HOME_OK=true;const items=okItems((snap.data()||{}).items);
+      const confirmed=!snap.metadata.hasPendingWrites&&!snap.metadata.fromCache;
       let pend=false;try{pend=!!localStorage.getItem(PEND)}catch(e){}
-      if(first&&!S.joinMerge&&pend){first=false;LASTC=items;pushDiff();return}   // edits made offline last time → send them
-      if(first&&S.joinMerge){first=false;LASTC=items;delete S.joinMerge;   // joining: keep this device's places AND the cloud's
-        const have=new Set(Object.keys(items));
-        const extra=realItems().filter(i=>!have.has(i.id));
-        S.items=[...S.items.filter(i=>i.sample),...Object.entries(items).map(([id,v])=>({id,...v,sample:false})),...extra];
-        try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}pushDiff();renderAll();return}
-      first=false;LASTC=items;
-      S.items=[...S.items.filter(i=>i.sample),...Object.entries(items).map(([id,v])=>({id,...v,sample:false}))];
-      try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}renderAll();
+      const rebuild=m=>{S.items=[...S.items.filter(i=>i.sample),...Object.entries(m).map(([id,v])=>({id,...v,sample:false}))];try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
+      if(first&&S.joinMerge){first=false;   // joining: keep this device's places AND the cloud's
+        delete S.joinMerge;LASTC=items;if(confirmed)setBase(items);
+        const m=Object.assign({},items);realItems().forEach(i=>{if(!m[i.id])m[i.id]=cleanP(i)});
+        rebuild(m);pushDiff();renderAll();return}
+      if(first&&pend){first=false;   // unsent edits from last time → replay only what THIS device changed since the last confirmed copy
+        const base=getBase(),loc={},m=Object.assign({},items);realItems().forEach(i=>{loc[i.id]=cleanP(i)});
+        Object.keys(loc).forEach(id=>{if(!base[id]||JSON.stringify(cleanP(base[id]))!==JSON.stringify(loc[id]))m[id]=loc[id]});
+        Object.keys(base).forEach(id=>{if(!loc[id])delete m[id]});
+        LASTC=items;if(confirmed)setBase(items);rebuild(m);pushDiff();renderAll();return}
+      first=false;LASTC=items;if(confirmed)setBase(items);
+      rebuild(items);renderAll();
     },err=>{HOME_UNSUB=null;HOME_OK=false;toast('אין חיבור לסנכרון כרגע')});
-  }).catch(()=>{HOME_UNSUB=null;toast('אין חיבור לענן, נשמר במכשיר')});
+  }).catch(()=>{if(HOME_UNSUB==='starting')HOME_UNSUB=null});
 }
 function pushDiff(){
-  if(!S.home||typeof HOME_UNSUB!=='function'||!LASTC)return;
+  if(!S.home)return;
+  if(typeof HOME_UNSUB!=='function'||!LASTC){try{localStorage.setItem(PEND,'1')}catch(e){}return}   // not connected yet → send when it is
   const upd={},cur={};
   realItems().forEach(i=>{cur[i.id]=cleanP(i);const o=LASTC[i.id];if(!o||JSON.stringify(cleanP(o))!==JSON.stringify(cur[i.id]))upd['items.'+i.id]=cur[i.id]});
   Object.keys(LASTC).forEach(id=>{if(!cur[id])upd['items.'+id]=firebase.firestore.FieldValue.delete()});
-  if(!Object.keys(upd).length){try{localStorage.removeItem(PEND)}catch(e){}return}
-  upd.t=Date.now();LASTC=Object.assign({},cur);try{localStorage.setItem(PEND,'1')}catch(e){}
-  const ref=homeRef();ref.set(nest(upd),{merge:true}).then(()=>{try{localStorage.removeItem(PEND)}catch(e){}}).catch(()=>{});
+  if(!Object.keys(upd).length){if(!INF)try{localStorage.removeItem(PEND)}catch(e){}return}
+  upd.t=Date.now();LASTC=Object.assign({},cur);try{localStorage.setItem(PEND,'1')}catch(e){}INF++;
+  homeRef().set(nest(upd),{merge:true}).then(()=>{if(--INF<=0){INF=0;try{localStorage.removeItem(PEND)}catch(e){}if(LASTC)setBase(LASTC)}})   // server confirmed → this is now the agreed copy.catch(()=>{INF=Math.max(0,INF-1)});
 }
 window.cloudSync=pushDiff;
 function homeLink(){return location.origin+location.pathname+'#home='+S.home}
@@ -422,14 +435,17 @@ function openHomeLink(){
     <div id="qrBox" style="display:grid;place-items:center;margin:6px 0 10px"></div>
     <div style="direction:ltr;word-break:break-all;font-size:12px;padding:8px 10px;border-radius:12px;border:1px solid var(--glass-brd);background:var(--card2);margin-bottom:10px">${esc(link)}</div>
     <div style="display:flex;gap:8px"><a class="btn block" style="text-align:center;text-decoration:none" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(msg)}">וואטסאפ</a>
-    <button class="btn block ghost" onclick="navigator.clipboard?.writeText('${link}');toast('הקישור הועתק ✓')">העתק קישור</button></div>`);
+    <button class="btn block ghost" id="cpHome">העתק קישור</button></div>`);
+  $('#cpHome').onclick=()=>{navigator.clipboard?.writeText(link);toast('הקישור הועתק ✓')};
   const box=$('#qrBox'),go=()=>{try{box.innerHTML='';new QRCode(box,{text:link,width:150,height:150,correctLevel:QRCode.CorrectLevel.M});Object.assign(box.style,{background:'#fff',padding:'10px',borderRadius:'14px',justifySelf:'center'})}catch(e){}};
   if(window.QRCode)go();else{const sc=document.createElement('script');sc.src='https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';sc.onload=go;document.head.appendChild(sc)}
 }
-function doUnpair(){if(typeof HOME_UNSUB==='function')HOME_UNSUB();HOME_UNSUB=null;HOME_OK=false;LASTC=null;S.home=null;try{localStorage.setItem(KEY,JSON.stringify(S));localStorage.removeItem(PEND)}catch(e){}closeSheet();toast('המכשיר נותק מהסנכרון')}
+function doUnpair(){if(typeof HOME_UNSUB==='function')HOME_UNSUB();HOME_UNSUB=null;HOME_OK=false;LASTC=null;S.home=null;delete S.joinMerge;setBase(null);try{localStorage.setItem(KEY,JSON.stringify(S));localStorage.removeItem(PEND)}catch(e){}closeSheet();toast('המכשיר נותק מהסנכרון')}
 function joinFromHash(){const h=location.hash.match(/home=([a-z0-9]{20,40})/);if(!h)return;history.replaceState(null,'',location.pathname);
   if(S.home!==h[1]){if(S.home)doUnpair();S.home=h[1];S.joinMerge=1;S.items=S.items.filter(i=>!i.sample);try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}toast('המכשיר חובר ✓ הרשימה מסתנכרנת');setView('list')}}
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&typeof HOME_UNSUB==='function'){let p=false;try{p=!!localStorage.getItem(PEND)}catch(e){}if(p)pushDiff()}});
+function reviveSync(){if(S.home&&!HOME_UNSUB)startHome();else if(typeof HOME_UNSUB==='function'){let p=false;try{p=!!localStorage.getItem(PEND)}catch(e){}if(p)pushDiff()}}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')reviveSync()});
+window.addEventListener('online',reviveSync);
 window.addEventListener('hashchange',()=>{joinFromHash();startHome();renderAll()});
 
 /* ============ theme ============ */
